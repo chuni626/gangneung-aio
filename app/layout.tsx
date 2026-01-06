@@ -19,6 +19,7 @@ export const metadata: Metadata = {
   verification: {
     // 🔑 사장님이 구글에서 받은 코드를 여기에 안전하게 심었습니다.
     google: "kG2m5o-XXrhcSvWHMUCNyfa9e-lvP0sTlkVw5S3L0Dg",
+    naver: "1d5bf82000439d733a0f562fbf3e6d4be0feb07d",
   },
 };
 
