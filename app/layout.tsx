@@ -17,9 +17,13 @@ export const metadata: Metadata = {
   title: "강릉 AI 데이터 허브 AIO",
   description: "2026 강릉 ITS 세계총회를 위한 로컬 데이터 댐 프로젝트",
   verification: {
-    // 🔑 사장님이 구글에서 받은 코드를 여기에 안전하게 심었습니다.
     google: "kG2m5o-XXrhcSvWHMUCNyfa9e-lvP0sTlkVw5S3L0Dg",
-    naver: "1d5bf82000439d733a0f562fbf3e6d4be0feb07d",
+    // 네이버는 아래처럼 'other' 항목 안에 넣어야 로봇이 인식합니다.
+    other: {
+      "naver-site-verification": [
+        "1d5bf82000439d733a0f562fbf3e6d4be0feb07d",
+      ],
+    },
   },
 };
 
