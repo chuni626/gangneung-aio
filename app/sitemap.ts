@@ -9,10 +9,18 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
+  // 1. DB에서 데이터 가져오기 (중복 포함)
   const { data: stores } = await supabase
     .from('gangneung_stores')
     .select('store_id, created_at');
 
+  // 2. [핵심 기술] 중복된 store_id 제거하기 (Set 활용)
+  // 똑같은 가게가 여러 개 있어도 하나만 남깁니다.
+  const uniqueStores = Array.from(
+    new Map((stores || []).map(store => [store.store_id, store])).values()
+  );
+
+  // 3. 고정 페이지 설정
   const staticPages: MetadataRoute.Sitemap = [
     {
       url: baseUrl,
@@ -20,7 +28,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: 'daily',
       priority: 1,
     },
-    // 로그인 페이지도 지도에 넣어주면 좋습니다
     {
       url: `${baseUrl}/login`,
       lastModified: new Date(),
@@ -29,15 +36,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     },
   ];
 
-  const storePages: MetadataRoute.Sitemap = stores
-    ? stores.map((store) => ({
-        // 🚨 [수정 포인트] 여기에 '/store'를 꼭 넣어주세요!
-        url: `${baseUrl}/store/${store.store_id}`, 
-        lastModified: new Date(store.created_at),
-        changeFrequency: 'daily', // AI에게 "매일 바뀌니 자주 와라"고 유혹
-        priority: 0.8,
-      }))
-    : [];
+  // 4. 가게 페이지 주소 생성 (여기서 /store 추가!)
+  const storePages: MetadataRoute.Sitemap = uniqueStores.map((store) => ({
+    url: `${baseUrl}/store/${store.store_id}`, // 👈 /store/ 꼭 확인하세요!
+    lastModified: new Date(store.created_at),
+    changeFrequency: 'daily',
+    priority: 0.8,
+  }));
 
   return [...staticPages, ...storePages];
 }
