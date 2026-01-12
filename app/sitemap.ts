@@ -1,23 +1,40 @@
 import { MetadataRoute } from 'next'
+import { createClient } from '@supabase/supabase-js'
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = 'https://gangneung-aio.vercel.app'
 
-  // 현재는 메인 페이지만 있지만, 향후 Phase 2에서 데이터가 쌓이면 
-  // 이곳에 자동으로 모든 가게 페이지가 추가되도록 설계되었습니다.
-  return [
+  // 1. Supabase에서 등록된 모든 가게 ID를 가져옵니다.
+  // (환경변수 사용 필수!)
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+
+  const { data: stores } = await supabase
+    .from('gangneung_stores')
+    .select('store_id, created_at');
+
+  // 2. 고정된 메인 페이지
+  const staticPages: MetadataRoute.Sitemap = [
     {
       url: baseUrl,
       lastModified: new Date(),
-      changeFrequency: 'daily', // 매일 업데이트됨을 로봇에게 알림
-      priority: 1, // 가장 중요한 페이지(메인)임을 표시
+      changeFrequency: 'daily',
+      priority: 1,
     },
-    // 예시: 향후 추가될 페이지 (나중에 자동으로 늘어나게 됩니다)
-    // {
-    //   url: `${baseUrl}/blog`,
-    //   lastModified: new Date(),
-    //   changeFrequency: 'weekly',
-    //   priority: 0.8,
-    // },
-  ]
+  ];
+
+  // 3. 데이터베이스에 있는 가게 페이지들을 자동으로 생성
+  const storePages: MetadataRoute.Sitemap = stores
+    ? stores.map((store) => ({
+        url: `${baseUrl}/${store.store_id}`,
+        lastModified: new Date(store.created_at),
+        changeFrequency: 'weekly',
+        priority: 0.8,
+      }))
+    : [];
+
+  // 4. 합쳐서 반환
+  return [...staticPages, ...storePages];
 }
