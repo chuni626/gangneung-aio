@@ -3,12 +3,14 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
+// 🤖 사용할 AI 모델 후보군 (성능 좋은 순)
 const MODEL_CANDIDATES = [
   "gemini-2.0-flash-exp", 
   "gemini-1.5-flash",
   "gemini-1.5-flash-latest"
 ];
 
+// 🛠️ 1. JSON 파싱 헬퍼 함수 (AI가 가끔 실수를 해도 찰떡같이 알아듣게)
 function extractAndParseJSON(text: string) {
   try {
     let cleanText = text.replace(/```json|```/g, "").trim();
@@ -33,7 +35,7 @@ function extractAndParseJSON(text: string) {
   }
 }
 
-// 네이버 PC 주소를 모바일 주소로 변환 (이미지 확보율 80% -> 95% 상승 비결)
+// 🛠️ 2. 네이버 PC 주소를 모바일 주소로 변환 (이미지 수집 성공률 80% -> 95% 상승 비결)
 function convertToMobileNaverUrl(url: string): string {
   try {
     const urlObj = new URL(url);
@@ -53,16 +55,19 @@ function convertToMobileNaverUrl(url: string): string {
 
 export async function POST(req: Request) {
   try {
-    const { url, keyword, groupName, collectionMode } = await req.json();
+    // ✅ storeId 추가: 관리자 대시보드에서 보낸 ID도 받습니다.
+    const { url, keyword, groupName, collectionMode, storeId } = await req.json();
     
     if (!url) return NextResponse.json({ error: 'URL 없음' }, { status: 400 });
 
+    // URL 정리 (Markdown 링크 등 제거)
     let originalUrl = url.trim();
     if (originalUrl.includes('](')) {
        const match = originalUrl.match(/\((https?:\/\/[^\)]+)\)/);
        if (match) originalUrl = match[1];
     }
 
+    // 모바일 주소로 변환
     const targetUrl = convertToMobileNaverUrl(originalUrl);
     console.log(`\n--- 🚀 [가동] ${originalUrl} -> (모바일) ${targetUrl} ---`);
 
@@ -71,21 +76,24 @@ export async function POST(req: Request) {
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
     );
     
-    const { data: existingUrl } = await supabase
-      .from('local_data')
-      .select('id')
-      .or(`source_url.eq.${originalUrl},source_url.eq.${targetUrl}`)
-      .maybeSingle();
+    // 🔍 중복 검사 (단, storeId가 있을 땐 강제 업데이트를 위해 통과시킬 수도 있음)
+    if (!storeId) {
+        const { data: existingUrl } = await supabase
+        .from('local_data')
+        .select('id')
+        .or(`source_url.eq.${originalUrl},source_url.eq.${targetUrl}`)
+        .maybeSingle();
 
-    if (existingUrl) {
-      console.log(`⚠️ [중복 URL] 패스`);
-      return NextResponse.json({ success: true, count: 0, message: "URL Duplicate" });
+        if (existingUrl) {
+            console.log(`⚠️ [중복 URL] 이미 수집된 데이터입니다.`);
+            return NextResponse.json({ success: true, count: 0, message: "URL Duplicate" });
+        }
     }
 
     const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
-    console.log('1️⃣ 데이터 수집 중 (모바일 모드)...');
+    console.log('1️⃣ 데이터 수집 중 (Firecrawl)...');
     
     const scrapeResult = await firecrawl.scrape(targetUrl, { formats: ['markdown'] }) as any;
     const rawMarkdown = scrapeResult.data?.markdown || scrapeResult.markdown;
@@ -95,7 +103,7 @@ export async function POST(req: Request) {
        return NextResponse.json({ success: true, count: 0, data: [] });
     }
 
-    console.log('2️⃣ AI 정밀 분석 (이미지 검증 보고서 작성 요청)...');
+    console.log('2️⃣ AI 정밀 분석 (이미지 검증 및 요약)...');
     let aiText = '';
 
     for (const modelName of MODEL_CANDIDATES) {
@@ -105,12 +113,12 @@ export async function POST(req: Request) {
           generationConfig: { responseMimeType: "application/json" }
         });
 
-        // 🔥 [사장님 요청 반영] 'reason' 필드 추가: 왜 이 사진을 골랐는지, 왜 못 골랐는지 보고해라.
+        // 🔥 [사장님 요청 반영] 'reason' 필드 포함: 이미지 선정 이유 보고
         const prompt = `
           너는 '강릉 로컬 콘텐츠 분석관'이야.
-          사용자 타겟: "${keyword}"
+          사용자 타겟: "${keyword || storeId || '강릉 여행'}"
           
-          **미션:** Markdown 본문에서 **가게 업종에 딱 맞는 베스트 사진 1장**을 찾아라.
+          **미션:** Markdown 본문에서 **가게 업종에 딱 맞는 베스트 사진 1장**을 찾고 내용을 요약해라.
           
           **[선택 기준]**
           - 맛집: 메인 음식 클로즈업.
@@ -122,13 +130,12 @@ export async function POST(req: Request) {
           **🚨 결과 보고 (JSON):**
           - image_url: 찾은 이미지 주소 (없으면 null)
           - reason: **(매우 중요)** 이미지를 선택한 이유 또는 **실패했다면 그 구체적인 사유**를 한글로 적어라.
-            (예: "맛있는 대게 사진 발견", "메뉴판 사진밖에 없어서 제외함", "본문에 이미지 링크가 없음")
-
+          
           **반환 형식 (JSON 배열):**
           [
             { 
-              "title": "${keyword}", 
-              "content": "후기 요약", 
+              "title": "${keyword || storeId || '정보'}", 
+              "content": "가게 특징, 메뉴, 분위기 등을 3줄 내외로 매력적으로 요약", 
               "category": "맛집",
               "image_url": "https://...",
               "reason": "선택/탈락 사유" 
@@ -150,7 +157,7 @@ export async function POST(req: Request) {
     if (!Array.isArray(parsedData)) parsedData = [parsedData];
 
     if (parsedData.length === 0) {
-        console.log(`⚠️ 필터링됨`);
+        console.log(`⚠️ 데이터 없음`);
         return NextResponse.json({ success: true, count: 0, data: [] });
     }
 
@@ -159,23 +166,38 @@ export async function POST(req: Request) {
         image_url: item.image_url 
     }));
     
-    // 🔥 [로그 출력] 터미널에서 바로 확인 가능
-    console.log(`📝 분석 결과: ${uniqueData[0]?.title}`);
+    // 🔥 [로그 출력]
+    console.log(`📝 분석 결과: ${uniqueData[0]?.content.slice(0, 20)}...`);
     console.log(`   📸 이미지: ${uniqueData[0]?.image_url ? '성공' : '실패 ❌'}`);
-    console.log(`   🧐 사유: "${uniqueData[0]?.reason}"`); // AI가 말하는 실패 사유 출력
+    console.log(`   🧐 사유: "${uniqueData[0]?.reason}"`);
 
+    // 💾 3. DB 저장: local_data 테이블 (전체 아카이브용)
     const rowsToInsert = uniqueData.map((item: any) => ({
       title: item.title,
       content: item.content,
       category: item.category,
       source_url: targetUrl,
       image_url: item.image_url || null,
-      group_name: groupName || null,
+      group_name: groupName || storeId || null, // storeId를 그룹명으로 활용
       collection_mode: collectionMode || 'net'
     }));
 
     const { error: dbError } = await supabase.from('local_data').insert(rowsToInsert);
     if (dbError) throw new Error(dbError.message);
+
+    // 🔗 4. [연동] 만약 관리자 페이지(storeId)에서 요청했다면, 매장 정보도 즉시 업데이트!
+    if (storeId && uniqueData.length > 0) {
+        const summary = uniqueData[0].content;
+        const imageUrl = uniqueData[0].image_url;
+
+        // gangneung_stores 테이블 업데이트
+        await supabase.from('gangneung_stores').update({
+            raw_info: summary, // AI 요약본을 실시간 소식에 넣기
+            // 만약 이미지 컬럼이 있다면 나중에 여기도 업데이트 가능
+        }).eq('store_id', storeId);
+        
+        console.log(`✅ 매장(${storeId}) 실시간 정보 동기화 완료`);
+    }
 
     return NextResponse.json({ success: true, count: uniqueData.length, data: uniqueData });
 
