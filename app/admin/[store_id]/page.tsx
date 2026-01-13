@@ -4,10 +4,9 @@ import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js'; 
 import { useParams, useRouter } from 'next/navigation';
 
-// 🏗️ 부품들 (경로 확인 필수!)
+// 🏗️ 부품들
 import { TrendChart } from '@/app/components/TrendChart';
-import { ImageUploader } from '@/app/components/ImageUploader'; // 📸 이미지 업로더 추가
-// BlogWriter, ReviewAnalyzer는 아래에서 직접 코드로 구현했습니다 (디자인 복구를 위해)
+import { ImageUploader } from '@/app/components/ImageUploader'; 
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -25,18 +24,21 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [dataCount, setDataCount] = useState(0);
   const [trendData, setTrendData] = useState<any[]>([]);
+  
+  // 📝 텍스트 상태
   const [newsInput, setNewsInput] = useState("");
+  // 📸 [NEW] 이미지 상태 추가!
+  const [storeImage, setStoreImage] = useState<string | null>(null);
+
   const [crawlUrl, setCrawlUrl] = useState("");
   const [isCrawling, setIsCrawling] = useState(false);
 
-  // 🔒 덮어쓰기 방지 잠금장치
   const preventOverwrite = useRef(false);
 
   useEffect(() => {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-         // 개발 중 편의를 위해 로그인 체크 패스
          if (storeId) fetchData();
       } else {
          if (storeId) fetchData();
@@ -52,6 +54,7 @@ export default function AdminPage() {
         const { count } = await supabase.from('gangneung_stores').select('*', { count: 'exact', head: true });
         setDataCount(count || 0);
 
+        // 이미지 URL도 같이 가져오기
         const { data: store } = await supabase.from('gangneung_stores')
             .select('raw_info, image_url')
             .eq('store_id', storeId)
@@ -61,6 +64,8 @@ export default function AdminPage() {
             
         if (store) {
             setNewsInput(store.raw_info || ""); 
+            // 📸 [NEW] 가져온 이미지를 상태에 저장!
+            setStoreImage(store.image_url || null);
         }
 
         setTrendData([
@@ -81,7 +86,7 @@ export default function AdminPage() {
     if (!crawlUrl) return alert("URL을 입력해주세요!");
 
     setIsCrawling(true);
-    preventOverwrite.current = true; // 잠금!
+    preventOverwrite.current = true; 
     
     try {
         const res = await fetch('/api/crawl', {
@@ -110,10 +115,12 @@ export default function AdminPage() {
   const handleUpdateNews = async () => {
     if (!newsInput) return alert("내용이 비어있습니다.");
     
+    // 이미지 정보는 유지하면서 텍스트만 업데이트
     const { error } = await supabase.from('gangneung_stores').upsert({ 
         store_id: storeId, 
         store_name: storeId, 
-        raw_info: newsInput 
+        raw_info: newsInput,
+        // image_url은 굳이 안 써도 기존거 유지됨 (upsert 특성상)
     });
 
     if (error) return alert("저장 실패: " + error.message);
@@ -139,13 +146,16 @@ export default function AdminPage() {
     }
   };
 
-  // 이미지 업로드 완료 시 DB 업데이트
+  // 이미지 업로드 완료되면 DB에 저장하고 화면 갱신
   const handleImageUploadComplete = async (url: string) => {
     const { error } = await supabase.from('gangneung_stores').upsert({
         store_id: storeId,
         image_url: url
     });
-    if(!error) fetchData(); // 이미지 바뀌었으니 새로고침
+    
+    if(!error) {
+        setStoreImage(url); // 화면 즉시 갱신
+    }
   };
 
   const handleLogout = async () => {
@@ -159,7 +169,6 @@ export default function AdminPage() {
     <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans">
       <div className="max-w-6xl mx-auto space-y-6">
         
-        {/* 헤더 */}
         <header className="flex justify-between items-end mb-4">
           <div>
             <h1 className="text-3xl font-black text-slate-900 uppercase">Admin Dashboard</h1>
@@ -168,16 +177,20 @@ export default function AdminPage() {
           <button onClick={handleLogout} className="text-xs bg-white border px-3 py-1 rounded hover:bg-slate-100">로그아웃</button>
         </header>
 
-        {/* 1열: 차트(2/3) + 이미지 업로더(1/3) */}
+        {/* 1열: 차트 + 이미지 업로더 */}
         <div className="grid md:grid-cols-3 gap-6">
           <div className="md:col-span-2">
             <TrendChart data={trendData} />
           </div>
-          {/* 📸 여기가 이미지 업로더 자리입니다! */}
-          <ImageUploader 
-             storeId={storeId} 
-             onUploadComplete={handleImageUploadComplete} 
-          />
+          
+          {/* 📸 [NEW] currentImage 속성을 추가해서 이미지를 전달합니다! */}
+          <div className="h-full">
+            <ImageUploader 
+               storeId={storeId} 
+               currentImage={storeImage} 
+               onUploadComplete={handleImageUploadComplete} 
+            />
+          </div>
         </div>
 
         {/* 2열: Firecrawl 수집기 */}
@@ -205,7 +218,7 @@ export default function AdminPage() {
             </div>
         </div>
 
-        {/* 3열: 실시간 소식 (넓은 박스) */}
+        {/* 3열: 실시간 소식 */}
         <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
             <div className="flex items-center gap-2 mb-4">
                 <h2 className="text-lg font-bold text-slate-700">📢 실시간 매장 소식 편집</h2>
@@ -227,10 +240,8 @@ export default function AdminPage() {
             </div>
         </div>
 
-        {/* 4열: 블로그 작가(파란박스 복구!) + 월간 보고서 */}
+        {/* 4열: 블로그 작가 + 보고서 */}
         <div className="grid md:grid-cols-2 gap-6">
-            
-            {/* 💎 AI 블로그 작가 (디자인 복구됨) */}
             <div className="bg-blue-600 p-6 rounded-3xl shadow-lg text-white">
                  <div className="flex justify-between items-center mb-4">
                     <h2 className="text-lg font-bold flex items-center gap-2">
@@ -251,7 +262,6 @@ export default function AdminPage() {
                  </div>
             </div>
             
-            {/* 📄 월간 성과 보고서 (디자인 복구됨) */}
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col">
                  <div className="flex justify-between items-center mb-6">
                     <h2 className="text-lg font-bold text-slate-700">📄 월간 성과 보고서</h2>
