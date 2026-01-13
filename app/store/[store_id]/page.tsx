@@ -1,137 +1,141 @@
-import { createClient } from '@supabase/supabase-js';
-import { Metadata } from 'next';
+'use client';
 
-// 1. Supabase 클라이언트 설정
+import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { createClient } from '@supabase/supabase-js';
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-// 2. Next.js 15 최신 버전에 맞춘 타입 정의 (Promise 필수)
-type Props = {
-  params: Promise<{ store_id: string }>;
-};
+export default function StorePage() {
+  const params = useParams();
+  // Next.js 15버전 대응 (params가 Promise일 수도 있음)
+  const rawStoreId = params?.store_id;
+  const storeId = typeof rawStoreId === 'string' ? decodeURIComponent(rawStoreId) : '';
 
-// 3. 메타데이터 생성 (SEO) - 검색엔진 노출용
-export async function generateMetadata(props: Props): Promise<Metadata> {
-  const params = await props.params;
-  const storeId = decodeURIComponent(params.store_id);
+  const [store, setStore] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
-  // 메타데이터에서도 최신 정보 1개만 가져오기
-  const { data: store } = await supabase
-    .from('gangneung_stores')
-    .select('raw_info')
-    .eq('store_id', storeId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  useEffect(() => {
+    const fetchStoreInfo = async () => {
+      if (!storeId) return;
+      try {
+        // 1. DB에서 'image_url'도 같이 가져오라고 명령!
+        const { data, error } = await supabase
+          .from('gangneung_stores')
+          .select('store_name, raw_info, image_url') 
+          .eq('store_id', storeId)
+          .maybeSingle();
 
-  const description = store?.raw_info 
-    ? `${storeId} 소식: ${store.raw_info.slice(0, 50)}...`
-    : `${storeId}의 실시간 정보를 데이터 댐에서 확인하세요.`;
+        if (error) throw error;
+        setStore(data);
+      } catch (err) {
+        console.error("데이터 로딩 실패:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  return {
-    title: `${storeId} | 강릉 AI 데이터 댐`,
-    description: description,
-  };
-}
+    fetchStoreInfo();
+  }, [storeId]);
 
-// 4. 메인 페이지 컴포넌트
-export default async function PublicStorePage(props: Props) {
-  // 🟢 [중요] 주소창의 파라미터 상자를 먼저 엽니다.
-  const params = await props.params;
-  const storeId = decodeURIComponent(params.store_id);
-
-  console.log("✅ ID 해독 완료:", storeId);
-
-  // 🛠️ [핵심 수정] 중복 데이터 방어 로직 적용!
-  // .order -> 최신순 정렬
-  // .limit(1) -> 무조건 1개만 가져옴 (중복 에러 해결)
-  const { data: store, error } = await supabase
-    .from('gangneung_stores')
-    .select('*')
-    .eq('store_id', storeId)
-    .order('created_at', { ascending: false }) 
-    .limit(1)
-    .maybeSingle();
-
-  if (error) {
-    console.error("❌ DB 에러:", error.message);
-  }
-
-  // 데이터가 없을 때를 대비한 기본 멘트
-  const latestNews = store?.raw_info || "현재 등록된 실시간 소식이 없습니다.";
-  const updateTime = store?.created_at
-    ? new Date(store.created_at).toLocaleString('ko-KR')
-    : "업데이트 대기 중";
-
-  // AI 로봇용 구조화 데이터 (JSON-LD)
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "Restaurant",
-    "name": storeId,
-    "description": latestNews,
-    "url": `https://gangneung-aio.vercel.app/store/${storeId}`,
-    "mainEntityOfPage": {
-      "@type": "WebPage",
-      "@id": `https://gangneung-aio.vercel.app/store/${storeId}`
-    },
-    "provider": {
-      "@type": "Organization",
-      "name": "강릉 AI 데이터 댐"
-    }
-  };
+  if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50">로딩 중...</div>;
+  if (!store) return <div className="min-h-screen flex items-center justify-center bg-slate-50">가게 정보를 찾을 수 없습니다.</div>;
 
   return (
-    <div className="min-h-screen bg-white font-sans text-slate-900">
-      {/* 🤖 화면엔 안 보이지만 AI는 읽어가는 데이터 */}
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-      />
-
-      <main className="max-w-3xl mx-auto p-6 md:p-12">
-        <header className="border-b border-slate-200 pb-6 mb-8">
-          <span className="bg-blue-600 text-white text-xs font-bold px-3 py-1 rounded-full mb-3 inline-block">
-            AI Verified ✅
-          </span>
-          <h1 className="text-4xl md:text-5xl font-black mb-2 tracking-tight break-all">
-            {storeId}
-          </h1>
-          <p className="text-slate-500 font-medium">
-            강릉 AI 데이터 댐 공식 인증 파트너
-          </p>
-        </header>
-
-        <section className="bg-slate-50 border border-slate-200 rounded-3xl p-8 shadow-sm">
-          <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-            📢 AI 실시간 브리핑
-          </h2>
-          <div className="text-slate-700 leading-relaxed text-lg break-keep">
-            "{latestNews}"
-          </div>
-          <p className="text-xs text-slate-400 mt-6 text-right">
-            최종 업데이트: {updateTime}
-          </p>
-        </section>
-
-        <div className="grid grid-cols-2 gap-4 mt-8">
-            <div className="border border-slate-100 rounded-2xl p-6 text-center">
-              <div className="text-2xl mb-2">🤖</div>
-              <p className="text-xs font-bold text-slate-400 uppercase">AI Bot Access</p>
-              <p className="font-black text-green-600">Allowed</p>
+    <div className="min-h-screen bg-slate-50 font-sans">
+      <div className="max-w-md mx-auto bg-white min-h-screen shadow-xl overflow-hidden relative">
+        
+        {/* 📸 [NEW] 대표 사진 영역 (사진이 있을 때만 보여줌) */}
+        {store.image_url ? (
+            <div className="w-full h-64 relative">
+                <img 
+                  src={store.image_url} 
+                  alt={store.store_name} 
+                  className="w-full h-full object-cover"
+                />
+                {/* 사진 위에 살짝 그라데이션을 줘서 글씨가 잘 보이게 함 */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+                <div className="absolute bottom-4 left-4 text-white">
+                    <h1 className="text-3xl font-black drop-shadow-md">{store.store_name}</h1>
+                </div>
             </div>
-            <div className="border border-slate-100 rounded-2xl p-6 text-center">
-              <div className="text-2xl mb-2">🌍</div>
-              <p className="text-xs font-bold text-slate-400 uppercase">Global Exposure</p>
-              <p className="font-black text-blue-600">Active</p>
+        ) : (
+            /* 사진 없으면 기존처럼 파란 배경 */
+            <div className="bg-blue-600 p-8 pt-20 text-white relative overflow-hidden">
+                <div className="relative z-10">
+                    <span className="bg-white/20 px-3 py-1 rounded-full text-xs font-bold mb-3 inline-block backdrop-blur-sm">
+                        🌊 강릉 로컬 인증 맛집
+                    </span>
+                    <h1 className="text-3xl font-black mb-2">{store.store_name}</h1>
+                    <p className="opacity-90 text-sm">AI가 실시간으로 분석한 로컬 정보입니다.</p>
+                </div>
+                {/* 장식용 원 */}
+                <div className="absolute top-[-50px] right-[-50px] w-64 h-64 bg-white/10 rounded-full blur-3xl"></div>
             </div>
+        )}
+
+        {/* 📢 AI 실시간 브리핑 */}
+        <div className="p-6 -mt-4 relative z-20">
+            <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-6 mb-6">
+                <div className="flex items-center gap-2 mb-4 border-b border-slate-100 pb-3">
+                    <span className="text-2xl animate-pulse">📢</span>
+                    <div>
+                        <h2 className="font-bold text-slate-800 text-lg">AI 실시간 브리핑</h2>
+                        <p className="text-xs text-slate-400">방금 업데이트된 소식입니다</p>
+                    </div>
+                </div>
+                
+                <div className="prose prose-slate text-slate-600 leading-relaxed text-sm">
+                    {/* 줄바꿈 문자를 HTML 줄바꿈으로 변환해서 보여줌 */}
+                    {store.raw_info ? (
+                        store.raw_info.split('\n').map((line: string, i: number) => (
+                            <p key={i} className="mb-2 last:mb-0">{line}</p>
+                        ))
+                    ) : (
+                        <p className="text-slate-400 text-center py-4">아직 등록된 소식이 없습니다.</p>
+                    )}
+                </div>
+                
+                <div className="mt-4 pt-4 border-t border-slate-50 flex justify-between items-center text-xs text-slate-400">
+                    <span>🤖 Gemini 1.5 Pro 분석</span>
+                    <span>{new Date().toLocaleDateString()} 기준</span>
+                </div>
+            </div>
+
+            {/* 메뉴 추천 (고정된 예시) */}
+            <h3 className="font-bold text-slate-800 text-lg mb-4 px-1">🔥 지금 뜨는 인기 키워드</h3>
+            <div className="grid grid-cols-2 gap-3 mb-8">
+                <div className="bg-orange-50 p-4 rounded-2xl border border-orange-100">
+                    <span className="text-2xl mb-2 block">🐟</span>
+                    <h4 className="font-bold text-orange-800">대방어 맛집</h4>
+                    <p className="text-xs text-orange-600 mt-1">"기름기가 꽉 찼어요"</p>
+                </div>
+                <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
+                    <span className="text-2xl mb-2 block">🌊</span>
+                    <h4 className="font-bold text-blue-800">오션뷰 최강</h4>
+                    <p className="text-xs text-blue-600 mt-1">"창가 자리 추천해요"</p>
+                </div>
+            </div>
+
+            {/* 예약/길찾기 버튼 */}
+            <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-100 md:max-w-md md:mx-auto">
+                <div className="flex gap-2">
+                    <button className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl font-bold hover:bg-slate-200 transition-colors">
+                        📍 길찾기
+                    </button>
+                    <button className="flex-[2] bg-blue-600 text-white py-3 rounded-xl font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition-colors">
+                        📞 예약 문의하기
+                    </button>
+                </div>
+            </div>
+            
+            {/* 하단 여백 (버튼에 가리지 않게) */}
+            <div className="h-20"></div>
         </div>
-
-        <footer className="mt-20 border-t border-slate-100 pt-8 text-center text-slate-400 text-sm">
-          <p>© 2026 Gangneung AI Data Dam Project. All Data Reserved.</p>
-        </footer>
-      </main>
+      </div>
     </div>
   );
 }
