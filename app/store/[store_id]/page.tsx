@@ -11,130 +11,103 @@ const supabase = createClient(
 
 export default function StorePage() {
   const params = useParams();
-  // Next.js 15버전 대응 (params가 Promise일 수도 있음)
   const rawStoreId = params?.store_id;
   const storeId = typeof rawStoreId === 'string' ? decodeURIComponent(rawStoreId) : '';
 
-  const [store, setStore] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<any>({ 
+    loading: true, 
+    idCheck: storeId, 
+    dbConnection: 'Checking...',
+    rowCount: 0,
+    dataFound: null,
+    error: null 
+  });
 
   useEffect(() => {
-    const fetchStoreInfo = async () => {
-      if (!storeId) return;
+    const runDiagnosis = async () => {
+      let result = { ...status, loading: false };
+
       try {
-        // 1. DB에서 'image_url'도 같이 가져오라고 명령!
-        const { data, error } = await supabase
+        // 1. 테이블 전체 개수 세기 (테이블이 비었는지 확인)
+        const { count, error: countError } = await supabase
           .from('gangneung_stores')
-          .select('store_name, raw_info, image_url') 
+          .select('*', { count: 'exact', head: true });
+        
+        if (countError) throw new Error(`테이블 접속 실패: ${countError.message}`);
+        result.rowCount = count;
+
+        // 2. 특정 ID로 데이터 찾아보기
+        const { data, error: dataError } = await supabase
+          .from('gangneung_stores')
+          .select('*') 
           .eq('store_id', storeId)
           .maybeSingle();
 
-        if (error) throw error;
-        setStore(data);
-      } catch (err) {
-        console.error("데이터 로딩 실패:", err);
-      } finally {
-        setLoading(false);
+        if (dataError) throw new Error(`데이터 조회 에러: ${dataError.message}`);
+        
+        result.dataFound = data ? "✅ 데이터 있음 (성공)" : "❌ 데이터 없음 (NULL)";
+        result.dbConnection = "✅ 연결 성공";
+        result.record = data; // 실제 가져온 데이터
+
+      } catch (err: any) {
+        result.error = err.message;
+        result.dbConnection = "❌ 연결/조회 실패";
       }
+
+      setStatus(result);
     };
 
-    fetchStoreInfo();
+    runDiagnosis();
   }, [storeId]);
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50">로딩 중...</div>;
-  if (!store) return <div className="min-h-screen flex items-center justify-center bg-slate-50">가게 정보를 찾을 수 없습니다.</div>;
-
   return (
-    <div className="min-h-screen bg-slate-50 font-sans">
-      <div className="max-w-md mx-auto bg-white min-h-screen shadow-xl overflow-hidden relative">
-        
-        {/* 📸 [NEW] 대표 사진 영역 (사진이 있을 때만 보여줌) */}
-        {store.image_url ? (
-            <div className="w-full h-64 relative">
-                <img 
-                  src={store.image_url} 
-                  alt={store.store_name} 
-                  className="w-full h-full object-cover"
-                />
-                {/* 사진 위에 살짝 그라데이션을 줘서 글씨가 잘 보이게 함 */}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
-                <div className="absolute bottom-4 left-4 text-white">
-                    <h1 className="text-3xl font-black drop-shadow-md">{store.store_name}</h1>
-                </div>
-            </div>
-        ) : (
-            /* 사진 없으면 기존처럼 파란 배경 */
-            <div className="bg-blue-600 p-8 pt-20 text-white relative overflow-hidden">
-                <div className="relative z-10">
-                    <span className="bg-white/20 px-3 py-1 rounded-full text-xs font-bold mb-3 inline-block backdrop-blur-sm">
-                        🌊 강릉 로컬 인증 맛집
-                    </span>
-                    <h1 className="text-3xl font-black mb-2">{store.store_name}</h1>
-                    <p className="opacity-90 text-sm">AI가 실시간으로 분석한 로컬 정보입니다.</p>
-                </div>
-                {/* 장식용 원 */}
-                <div className="absolute top-[-50px] right-[-50px] w-64 h-64 bg-white/10 rounded-full blur-3xl"></div>
+    <div className="min-h-screen bg-slate-900 text-green-400 p-10 font-mono text-sm">
+      <h1 className="text-2xl font-bold text-white mb-6">🕵️‍♂️ 엑스레이 진단 모드</h1>
+      
+      <div className="border border-green-800 p-6 rounded bg-black/50 space-y-4">
+        <div>
+          <strong className="text-white block mb-1">1. URL에서 받은 ID:</strong>
+          <span className="text-xl bg-blue-900 text-white px-2 py-1">{status.idCheck}</span>
+        </div>
+
+        <div>
+          <strong className="text-white block mb-1">2. 데이터베이스 연결 상태:</strong>
+          <span>{status.dbConnection}</span>
+        </div>
+
+        <div>
+          <strong className="text-white block mb-1">3. gangneung_stores 테이블 총 데이터 개수:</strong>
+          <span className="text-xl text-yellow-400">{status.rowCount} 개</span>
+          {status.rowCount === 0 && <p className="text-red-500 font-bold">🚨 경고: 테이블이 비어있습니다! 데이터를 넣어야 합니다.</p>}
+        </div>
+
+        <div>
+          <strong className="text-white block mb-1">4. 조회 결과:</strong>
+          <span className="text-xl">{status.dataFound}</span>
+        </div>
+
+        {status.error && (
+            <div className="bg-red-900/50 p-4 border border-red-500 text-white">
+                <strong>🚨 에러 발생:</strong> {status.error}
+                <p className="mt-2 text-sm text-gray-300">
+                    * "policy" 관련 에러라면 -> SQL Editor에서 권한 설정 다시 실행<br/>
+                    * "relation does not exist"라면 -> 테이블 이름 틀림
+                </p>
             </div>
         )}
 
-        {/* 📢 AI 실시간 브리핑 */}
-        <div className="p-6 -mt-4 relative z-20">
-            <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-6 mb-6">
-                <div className="flex items-center gap-2 mb-4 border-b border-slate-100 pb-3">
-                    <span className="text-2xl animate-pulse">📢</span>
-                    <div>
-                        <h2 className="font-bold text-slate-800 text-lg">AI 실시간 브리핑</h2>
-                        <p className="text-xs text-slate-400">방금 업데이트된 소식입니다</p>
-                    </div>
-                </div>
-                
-                <div className="prose prose-slate text-slate-600 leading-relaxed text-sm">
-                    {/* 줄바꿈 문자를 HTML 줄바꿈으로 변환해서 보여줌 */}
-                    {store.raw_info ? (
-                        store.raw_info.split('\n').map((line: string, i: number) => (
-                            <p key={i} className="mb-2 last:mb-0">{line}</p>
-                        ))
-                    ) : (
-                        <p className="text-slate-400 text-center py-4">아직 등록된 소식이 없습니다.</p>
-                    )}
-                </div>
-                
-                <div className="mt-4 pt-4 border-t border-slate-50 flex justify-between items-center text-xs text-slate-400">
-                    <span>🤖 Gemini 1.5 Pro 분석</span>
-                    <span>{new Date().toLocaleDateString()} 기준</span>
-                </div>
+        {status.record && (
+             <div className="bg-green-900/30 p-4 border border-green-500 text-gray-300">
+                <strong>📝 가져온 데이터 미리보기:</strong>
+                <pre className="mt-2 text-xs overflow-auto">
+                    {JSON.stringify(status.record, null, 2)}
+                </pre>
             </div>
+        )}
+      </div>
 
-            {/* 메뉴 추천 (고정된 예시) */}
-            <h3 className="font-bold text-slate-800 text-lg mb-4 px-1">🔥 지금 뜨는 인기 키워드</h3>
-            <div className="grid grid-cols-2 gap-3 mb-8">
-                <div className="bg-orange-50 p-4 rounded-2xl border border-orange-100">
-                    <span className="text-2xl mb-2 block">🐟</span>
-                    <h4 className="font-bold text-orange-800">대방어 맛집</h4>
-                    <p className="text-xs text-orange-600 mt-1">"기름기가 꽉 찼어요"</p>
-                </div>
-                <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
-                    <span className="text-2xl mb-2 block">🌊</span>
-                    <h4 className="font-bold text-blue-800">오션뷰 최강</h4>
-                    <p className="text-xs text-blue-600 mt-1">"창가 자리 추천해요"</p>
-                </div>
-            </div>
-
-            {/* 예약/길찾기 버튼 */}
-            <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-100 md:max-w-md md:mx-auto">
-                <div className="flex gap-2">
-                    <button className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl font-bold hover:bg-slate-200 transition-colors">
-                        📍 길찾기
-                    </button>
-                    <button className="flex-[2] bg-blue-600 text-white py-3 rounded-xl font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition-colors">
-                        📞 예약 문의하기
-                    </button>
-                </div>
-            </div>
-            
-            {/* 하단 여백 (버튼에 가리지 않게) */}
-            <div className="h-20"></div>
-        </div>
+      <div className="mt-10 text-gray-500 text-xs">
+        * 확인 후에는 다시 원래 코드로 복구해야 합니다.
       </div>
     </div>
   );
