@@ -14,100 +14,88 @@ export default function StorePage() {
   const rawStoreId = params?.store_id;
   const storeId = typeof rawStoreId === 'string' ? decodeURIComponent(rawStoreId) : '';
 
-  const [status, setStatus] = useState<any>({ 
-    loading: true, 
-    idCheck: storeId, 
-    dbConnection: 'Checking...',
-    rowCount: 0,
-    dataFound: null,
-    error: null 
-  });
+  const [store, setStore] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [debugInfo, setDebugInfo] = useState<any>(null); // 🕵️ 진단용 데이터
+
+  const fetchStoreData = async () => {
+    try {
+      // 🚨 1. DB에서 데이터를 가져올 때 '캐시'를 무시하고 새로 가져오도록 설정
+      const { data, error } = await supabase
+        .from('gangneung_stores')
+        .select('*')
+        .eq('store_id', storeId)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      setStore(data);
+      setDebugInfo(data); // 🕵️ 현재 DB 상태를 진단창에 기록
+    } catch (err) {
+      console.error("로딩 실패:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const runDiagnosis = async () => {
-      let result = { ...status, loading: false };
+    if (!storeId) return;
+    fetchStoreData();
 
-      try {
-        // 1. 테이블 전체 개수 세기 (테이블이 비었는지 확인)
-        const { count, error: countError } = await supabase
-          .from('gangneung_stores')
-          .select('*', { count: 'exact', head: true });
-        
-        if (countError) throw new Error(`테이블 접속 실패: ${countError.message}`);
-        result.rowCount = count;
+    // 📡 실시간 감시 (변경되면 즉시 다시 가져오기)
+    const subscription = supabase
+      .channel('store-db-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'gangneung_stores' }, () => {
+        fetchStoreData();
+      })
+      .subscribe();
 
-        // 2. 특정 ID로 데이터 찾아보기
-        const { data, error: dataError } = await supabase
-          .from('gangneung_stores')
-          .select('*') 
-          .eq('store_id', storeId)
-          .maybeSingle();
-
-        if (dataError) throw new Error(`데이터 조회 에러: ${dataError.message}`);
-        
-        result.dataFound = data ? "✅ 데이터 있음 (성공)" : "❌ 데이터 없음 (NULL)";
-        result.dbConnection = "✅ 연결 성공";
-        result.record = data; // 실제 가져온 데이터
-
-      } catch (err: any) {
-        result.error = err.message;
-        result.dbConnection = "❌ 연결/조회 실패";
-      }
-
-      setStatus(result);
-    };
-
-    runDiagnosis();
+    return () => { supabase.removeChannel(subscription); };
   }, [storeId]);
 
+  if (loading) return <div className="p-10 text-center">데이터 확인 중...</div>;
+
   return (
-    <div className="min-h-screen bg-slate-900 text-green-400 p-10 font-mono text-sm">
-      <h1 className="text-2xl font-bold text-white mb-6">🕵️‍♂️ 엑스레이 진단 모드</h1>
-      
-      <div className="border border-green-800 p-6 rounded bg-black/50 space-y-4">
-        <div>
-          <strong className="text-white block mb-1">1. URL에서 받은 ID:</strong>
-          <span className="text-xl bg-blue-900 text-white px-2 py-1">{status.idCheck}</span>
-        </div>
-
-        <div>
-          <strong className="text-white block mb-1">2. 데이터베이스 연결 상태:</strong>
-          <span>{status.dbConnection}</span>
-        </div>
-
-        <div>
-          <strong className="text-white block mb-1">3. gangneung_stores 테이블 총 데이터 개수:</strong>
-          <span className="text-xl text-yellow-400">{status.rowCount} 개</span>
-          {status.rowCount === 0 && <p className="text-red-500 font-bold">🚨 경고: 테이블이 비어있습니다! 데이터를 넣어야 합니다.</p>}
-        </div>
-
-        <div>
-          <strong className="text-white block mb-1">4. 조회 결과:</strong>
-          <span className="text-xl">{status.dataFound}</span>
-        </div>
-
-        {status.error && (
-            <div className="bg-red-900/50 p-4 border border-red-500 text-white">
-                <strong>🚨 에러 발생:</strong> {status.error}
-                <p className="mt-2 text-sm text-gray-300">
-                    * "policy" 관련 에러라면 -> SQL Editor에서 권한 설정 다시 실행<br/>
-                    * "relation does not exist"라면 -> 테이블 이름 틀림
-                </p>
-            </div>
-        )}
-
-        {status.record && (
-             <div className="bg-green-900/30 p-4 border border-green-500 text-gray-300">
-                <strong>📝 가져온 데이터 미리보기:</strong>
-                <pre className="mt-2 text-xs overflow-auto">
-                    {JSON.stringify(status.record, null, 2)}
-                </pre>
-            </div>
-        )}
+    <div className="min-h-screen bg-slate-50 font-sans pb-24">
+      {/* 🕵️‍♂️ [자가 진단창] - 성공하면 나중에 이 부분만 지우면 됩니다 */}
+      <div className="max-w-md mx-auto bg-black text-green-400 p-4 text-[10px] font-mono break-all z-50 relative">
+        <p className="font-bold border-b border-green-800 mb-2">[🕵️ 실시간 DB 진단 모드]</p>
+        <p>● 접속 URL ID: {storeId}</p>
+        <p>● DB에서 찾은 store_id: {debugInfo?.store_id || '❌ 없음'}</p>
+        <p>● DB에 등록된 이미지 주소: <br/>{debugInfo?.image_url || '❌ 없음'}</p>
+        {debugInfo?.image_url && <p className="text-yellow-400 mt-1">✅ 사진 주소가 DB에 있습니다! 안 보인다면 브라우저 새로고침(F5)을 세게 눌러보세요.</p>}
       </div>
 
-      <div className="mt-10 text-gray-500 text-xs">
-        * 확인 후에는 다시 원래 코드로 복구해야 합니다.
+      <div className="max-w-md mx-auto bg-white min-h-screen shadow-2xl relative overflow-hidden">
+        {/* 📸 사진 출력 영역 */}
+        {store?.image_url ? (
+            <div className="w-full h-80 relative">
+                <img 
+                  key={store.image_url} // 주소가 바뀌면 이미지를 새로 강제 렌더링
+                  src={store.image_url} 
+                  className="w-full h-full object-cover"
+                  alt="가게 사진"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
+                <div className="absolute bottom-6 left-6 text-white text-left">
+                    <h1 className="text-4xl font-black">{store.store_name}</h1>
+                </div>
+            </div>
+        ) : (
+            <div className="bg-blue-600 p-10 pt-24 text-white text-left">
+                <h1 className="text-3xl font-black">{store?.store_name || "가게 이름 없음"}</h1>
+                <p className="mt-2 opacity-70">사진이 아직 DB에 반영되지 않았습니다.</p>
+            </div>
+        )}
+
+        <div className="p-6">
+            <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-6 -mt-16 relative z-10 text-left">
+                <h2 className="font-bold text-slate-800 text-lg mb-4">📢 실시간 소식</h2>
+                <div className="text-slate-600 text-sm leading-relaxed whitespace-pre-wrap">
+                    {store?.raw_info || "소식이 없습니다."}
+                </div>
+            </div>
+        </div>
       </div>
     </div>
   );
