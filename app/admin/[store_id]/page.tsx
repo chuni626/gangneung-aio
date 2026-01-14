@@ -146,31 +146,37 @@ export default function AdminPage() {
       }
   };
 
-  const handleBlogPublish = async () => {
-      if(!blogTopic) return alert("글 주제를 입력해주세요.");
-      if(blogImages.length === 0) return alert("사진을 최소 1장 추가해주세요.");
+// 기존 handleBlogPublish 함수를 이걸로 덮어쓰세요!
+const handleBlogPublish = async () => {
+    if(!blogTopic) return alert("글 주제를 입력해주세요.");
+    // ❌ 삭제된 부분: if(blogImages.length === 0) return alert("사진을 최소 1장 추가해주세요.");
 
-      setIsPublishing(true);
-      addLog("✍️ n8n 작가에게 집필 요청 중...");
-      
-      const ok = await sendToN8N({ 
-          event: 'publish_blog',
-          topic: blogTopic,
-          imageCount: blogImages.length,
-          storeId 
-      });
+    setIsPublishing(true);
+    addLog(`✍️ AI 작가에게 집필 요청 중... (사진: ${blogImages.length}장)`);
+    
+    // 사진이 0장이면 0장이라고 n8n에 솔직하게 말합니다.
+    const ok = await sendToN8N({ 
+        event: 'publish_blog',
+        topic: blogTopic,
+        imageCount: blogImages.length, // 이 숫자가 중요합니다!
+        storeId 
+    });
 
-      if (ok) addLog("✅ n8n 발행 요청 성공");
-      else addLog("❌ n8n 통신 실패");
+    if (ok) addLog("✅ n8n 발행 요청 성공");
+    else addLog("❌ n8n 통신 실패");
 
-      setTimeout(() => {
-          setIsPublishing(false);
-          setBlogTopic("");
-          setBlogImages([]);
-          setBlogPreviewUrls([]);
-          alert(`🚀 n8n 로봇이 '${blogTopic}' 주제로 포스팅을 시작합니다!`);
-      }, 1500);
-  };
+    setTimeout(() => {
+        setIsPublishing(false);
+        setBlogTopic("");
+        setBlogImages([]);
+        setBlogPreviewUrls([]);
+        // 메시지도 상황에 맞게 바꿉니다.
+        const msg = blogImages.length > 0 
+          ? `🚀 n8n이 사진 ${blogImages.length}장과 함께 포스팅을 시작합니다!` 
+          : `🎨 n8n이 주제에 맞는 이미지를 생성하고 포스팅을 시작합니다!`;
+        alert(msg);
+    }, 1500);
+};
 
   // 5. 📊 월간 성과 보고서 (기능 보존)
   const handleRefreshReport = () => {
