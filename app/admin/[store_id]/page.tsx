@@ -71,7 +71,7 @@ export default function AdminPage() {
   // 🛠️ n8n 전송용 공통 함수 (JSON 헤더 추가로 '화살표' 문제 해결)
   const sendToN8N = async (payload: any) => {
     try {
-        const res = await fetch(N8N_WEBHOOK_URL, {
+        const res = await fetch('http://localhost:5678/webhook-test/8272dc55-065e-4695-b01b-98a9b5ee16fc', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }, // 👈 n8n에서 데이터를 분해하게 만드는 핵심!
             body: JSON.stringify(payload)

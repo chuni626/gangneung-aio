@@ -1,4 +1,5 @@
 "use client"; // 클라이언트 컴포넌트로 전환 (useEffect 사용 위해)
+import ReactMarkdown from 'react-markdown';
 import { useState, useEffect, use } from "react";
 import { createClient } from "@supabase/supabase-js";
 
